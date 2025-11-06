@@ -52,7 +52,7 @@ type Config struct {
 	AuthRequired []string `yaml:"authRequired" validate:"required"`
 	Description  string   `yaml:"description" validate:"required"`
 	Database     string   `yaml:"database" validate:"required"`
-	Collection   string   `yaml:"collection" validate:"required"`
+	Collection   string   `yaml:"collection"`
 	Canonical    bool     `yaml:"canonical" validate:"required"` //i want to force the user to choose
 }
 
@@ -78,7 +78,19 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 
 	payloadParams := tools.NewStringParameterWithRequired(dataParamsKey, "the JSON payload to insert, should be a JSON object", true)
 
-	allParameters := tools.Parameters{payloadParams}
+	// Add collection parameter if not specified in config
+	var allParameters tools.Parameters
+	if cfg.Collection == "" {
+		collectionParam := tools.Parameter{
+			Name:        "collection",
+			Description: "The name of the collection to insert into",
+			Type:        "string",
+			Required:    true,
+		}
+		allParameters = tools.Parameters{collectionParam, payloadParams}
+	} else {
+		allParameters = tools.Parameters{payloadParams}
+	}
 
 	// Create Toolbox manifest
 	paramManifest := allParameters.Manifest()
@@ -125,10 +137,30 @@ func (t Tool) Invoke(ctx context.Context, params tools.ParamValues, accessToken 
 	if len(params) == 0 {
 		return nil, errors.New("no input found")
 	}
-	// use the first, assume it's a string
-	var jsonData, ok = params[0].Value.(string)
+
+	// Determine collection name
+	var collectionName string
+	var dataParamIndex int
+	if t.Collection != "" {
+		collectionName = t.Collection
+		dataParamIndex = 0
+	} else {
+		// Collection is first parameter, data is second
+		if len(params) < 2 {
+			return nil, errors.New("collection and data parameters are required")
+		}
+		var ok bool
+		collectionName, ok = params[0].Value.(string)
+		if !ok {
+			return nil, errors.New("collection parameter must be a string")
+		}
+		dataParamIndex = 1
+	}
+
+	// Get the data parameter
+	var jsonData, ok = params[dataParamIndex].Value.(string)
 	if !ok {
-		return nil, errors.New("no input found")
+		return nil, errors.New("data parameter must be a string")
 	}
 
 	var data any
@@ -137,7 +169,7 @@ func (t Tool) Invoke(ctx context.Context, params tools.ParamValues, accessToken 
 		return nil, err
 	}
 
-	res, err := t.database.Collection(t.Collection).InsertOne(ctx, data, options.InsertOne())
+	res, err := t.database.Collection(collectionName).InsertOne(ctx, data, options.InsertOne())
 	if err != nil {
 		return nil, err
 	}

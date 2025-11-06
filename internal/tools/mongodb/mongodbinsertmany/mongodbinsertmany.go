@@ -52,7 +52,7 @@ type Config struct {
 	AuthRequired []string `yaml:"authRequired" validate:"required"`
 	Description  string   `yaml:"description" validate:"required"`
 	Database     string   `yaml:"database" validate:"required"`
-	Collection   string   `yaml:"collection" validate:"required"`
+	Collection   string   `yaml:"collection"`
 	Canonical    bool     `yaml:"canonical" validate:"required"` //i want to force the user to choose
 }
 
@@ -78,7 +78,19 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 
 	dataParam := tools.NewStringParameterWithRequired(paramDataKey, "the JSON payload to insert, should be a JSON array of documents", true)
 
-	allParameters := tools.Parameters{dataParam}
+	// Add collection parameter if not specified in config
+	var allParameters tools.Parameters
+	if cfg.Collection == "" {
+		collectionParam := tools.Parameter{
+			Name:        "collection",
+			Description: "The name of the collection to insert into",
+			Type:        "string",
+			Required:    true,
+		}
+		allParameters = tools.Parameters{collectionParam, dataParam}
+	} else {
+		allParameters = tools.Parameters{dataParam}
+	}
 
 	// Create Toolbox manifest
 	paramManifest := allParameters.Manifest()
@@ -127,6 +139,21 @@ func (t Tool) Invoke(ctx context.Context, params tools.ParamValues, accessToken 
 
 	paramsMap := params.AsMap()
 
+	// Determine collection name
+	var collectionName string
+	if t.Collection != "" {
+		collectionName = t.Collection
+	} else {
+		colParam, ok := paramsMap["collection"]
+		if !ok {
+			return nil, fmt.Errorf("collection parameter is required")
+		}
+		collectionName, ok = colParam.(string)
+		if !ok {
+			return nil, fmt.Errorf("collection parameter must be a string")
+		}
+	}
+
 	var jsonData, ok = paramsMap[paramDataKey].(string)
 	if !ok {
 		return nil, errors.New("no input found")
@@ -138,7 +165,7 @@ func (t Tool) Invoke(ctx context.Context, params tools.ParamValues, accessToken 
 		return nil, err
 	}
 
-	res, err := t.database.Collection(t.Collection).InsertMany(ctx, data, options.InsertMany())
+	res, err := t.database.Collection(collectionName).InsertMany(ctx, data, options.InsertMany())
 	if err != nil {
 		return nil, err
 	}

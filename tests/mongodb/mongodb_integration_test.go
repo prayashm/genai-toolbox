@@ -781,6 +781,16 @@ func getMongoDBToolsConfig(sourceConfig map[string]any, toolKind string) map[str
 				"authRequired": []string{},
 				"database":     MongoDbDatabase,
 			},
+			"my-runtime-collection-find-tool": map[string]any{
+				"kind":          "mongodb-find",
+				"source":        "my-instance",
+				"description":   "Tool to test runtime collection parameter.",
+				"authRequired":  []string{},
+				"database":      MongoDbDatabase,
+				// collection omitted - will be a runtime parameter
+				"filterPayload": `{ "name": "foo" }`,
+				"limit":         10,
+			},
 		},
 	}
 
@@ -816,6 +826,17 @@ func runToolDiscoveryInvokeTest(t *testing.T) {
 			requestBody:   bytes.NewBuffer([]byte(`{}`)),
 			checkResult: func(result string) bool {
 				// Check that result contains "test_collection"
+				return len(result) > 0 && result[0] == '[' && result[len(result)-1] == ']'
+			},
+			isErr: false,
+		},
+		{
+			name:          "invoke my-runtime-collection-find-tool with runtime collection",
+			api:           "http://127.0.0.1:5000/api/tool/my-runtime-collection-find-tool/invoke",
+			requestHeader: map[string]string{},
+			requestBody:   bytes.NewBuffer([]byte(`{"collection": "test_collection"}`)),
+			checkResult: func(result string) bool {
+				// Check that result is a JSON array
 				return len(result) > 0 && result[0] == '[' && result[len(result)-1] == ']'
 			},
 			isErr: false,

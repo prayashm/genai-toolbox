@@ -53,7 +53,7 @@ type Config struct {
 	AuthRequired   []string         `yaml:"authRequired" validate:"required"`
 	Description    string           `yaml:"description" validate:"required"`
 	Database       string           `yaml:"database" validate:"required"`
-	Collection     string           `yaml:"collection" validate:"required"`
+	Collection     string           `yaml:"collection"`
 	FilterPayload  string           `yaml:"filterPayload" validate:"required"`
 	FilterParams   tools.Parameters `yaml:"filterParams"`
 	ProjectPayload string           `yaml:"projectPayload"`
@@ -84,7 +84,21 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 	}
 
 	// Create a slice for all parameters
-	allParameters := slices.Concat(cfg.FilterParams, cfg.ProjectParams, cfg.SortParams)
+	baseParameters := slices.Concat(cfg.FilterParams, cfg.ProjectParams, cfg.SortParams)
+
+	// Add collection parameter if not specified in config
+	var allParameters tools.Parameters
+	if cfg.Collection == "" {
+		collectionParam := tools.Parameter{
+			Name:        "collection",
+			Description: "The name of the collection to query",
+			Type:        "string",
+			Required:    true,
+		}
+		allParameters = append(tools.Parameters{collectionParam}, baseParameters...)
+	} else {
+		allParameters = baseParameters
+	}
 
 	// Verify no duplicate parameter names
 	err := tools.CheckDuplicateParameters(allParameters)
@@ -191,6 +205,21 @@ func getOptions(ctx context.Context, sortParameters tools.Parameters, projectPay
 func (t Tool) Invoke(ctx context.Context, params tools.ParamValues, accessToken tools.AccessToken) (any, error) {
 	paramsMap := params.AsMap()
 
+	// Determine collection name
+	var collectionName string
+	if t.Collection != "" {
+		collectionName = t.Collection
+	} else {
+		colParam, ok := paramsMap["collection"]
+		if !ok {
+			return nil, fmt.Errorf("collection parameter is required")
+		}
+		collectionName, ok = colParam.(string)
+		if !ok {
+			return nil, fmt.Errorf("collection parameter must be a string")
+		}
+	}
+
 	filterString, err := tools.PopulateTemplateWithJSON("MongoDBFindFilterString", t.FilterPayload, paramsMap)
 
 	if err != nil {
@@ -208,7 +237,7 @@ func (t Tool) Invoke(ctx context.Context, params tools.ParamValues, accessToken 
 		return nil, err
 	}
 
-	cur, err := t.database.Collection(t.Collection).Find(ctx, filter, opts)
+	cur, err := t.database.Collection(collectionName).Find(ctx, filter, opts)
 	if err != nil {
 		return nil, err
 	}
