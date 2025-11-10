@@ -84,12 +84,7 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 	// Add collection parameter if not specified in config
 	var allParameters tools.Parameters
 	if cfg.Collection == "" {
-		collectionParam := tools.Parameter{
-			Name:        "collection",
-			Description: "The name of the collection to aggregate",
-			Type:        "string",
-			Required:    true,
-		}
+		collectionParam := tools.NewStringParameterWithRequired("collection", "The name of the collection to aggregate", true)
 		allParameters = append(tools.Parameters{collectionParam}, baseParameters...)
 	} else {
 		allParameters = baseParameters

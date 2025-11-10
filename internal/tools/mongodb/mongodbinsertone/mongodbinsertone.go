@@ -81,12 +81,7 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 	// Add collection parameter if not specified in config
 	var allParameters tools.Parameters
 	if cfg.Collection == "" {
-		collectionParam := tools.Parameter{
-			Name:        "collection",
-			Description: "The name of the collection to insert into",
-			Type:        "string",
-			Required:    true,
-		}
+		collectionParam := tools.NewStringParameterWithRequired("collection", "The name of the collection to insert into", true)
 		allParameters = tools.Parameters{collectionParam, payloadParams}
 	} else {
 		allParameters = tools.Parameters{payloadParams}

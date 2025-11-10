@@ -82,12 +82,7 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 	var allParams tools.Parameters
 	if cfg.Database == "" {
 		// Database not specified in config, so add it as a parameter
-		databaseParam := tools.Parameter{
-			Name:        "database",
-			Description: "The name of the database to list collections from",
-			Type:        "string",
-			Required:    true,
-		}
+		databaseParam := tools.NewStringParameterWithRequired("database", "The name of the database to list collections from", true)
 		allParams = append(tools.Parameters{databaseParam}, cfg.Params...)
 	} else {
 		// Database is specified in config, use provided params
