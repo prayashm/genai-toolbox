@@ -50,7 +50,7 @@ type Config struct {
 	AuthRequired  []string         `yaml:"authRequired" validate:"required"`
 	Description   string           `yaml:"description" validate:"required"`
 	Database      string           `yaml:"database" validate:"required"`
-	Collection    string           `yaml:"collection" validate:"required"`
+	Collection    string           `yaml:"collection"`
 	FilterPayload string           `yaml:"filterPayload" validate:"required"`
 	FilterParams  tools.Parameters `yaml:"filterParams"`
 	UpdatePayload string           `yaml:"updatePayload" validate:"required"`
@@ -81,7 +81,16 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 	}
 
 	// Create a slice for all parameters
-	allParameters := slices.Concat(cfg.FilterParams, cfg.UpdateParams)
+	baseParameters := slices.Concat(cfg.FilterParams, cfg.UpdateParams)
+
+	// Add collection parameter if not specified in config
+	var allParameters tools.Parameters
+	if cfg.Collection == "" {
+		collectionParam := tools.NewStringParameterWithRequired("collection", "The name of the collection to update", true)
+		allParameters = append(tools.Parameters{collectionParam}, baseParameters...)
+	} else {
+		allParameters = baseParameters
+	}
 
 	// Verify no duplicate parameter names
 	err := tools.CheckDuplicateParameters(allParameters)
@@ -143,6 +152,21 @@ type Tool struct {
 func (t Tool) Invoke(ctx context.Context, params tools.ParamValues, accessToken tools.AccessToken) (any, error) {
 	paramsMap := params.AsMap()
 
+	// Determine collection name
+	var collectionName string
+	if t.Collection != "" {
+		collectionName = t.Collection
+	} else {
+		colParam, ok := paramsMap["collection"]
+		if !ok {
+			return nil, fmt.Errorf("collection parameter is required")
+		}
+		collectionName, ok = colParam.(string)
+		if !ok {
+			return nil, fmt.Errorf("collection parameter must be a string")
+		}
+	}
+
 	filterString, err := tools.PopulateTemplateWithJSON("MongoDBUpdateOneFilter", t.FilterPayload, paramsMap)
 	if err != nil {
 		return nil, fmt.Errorf("error populating filter: %s", err)
@@ -165,7 +189,7 @@ func (t Tool) Invoke(ctx context.Context, params tools.ParamValues, accessToken 
 		return nil, fmt.Errorf("unable to unmarshal update string: %w", err)
 	}
 
-	res, err := t.database.Collection(t.Collection).UpdateOne(ctx, filter, update, options.Update().SetUpsert(t.Upsert))
+	res, err := t.database.Collection(collectionName).UpdateOne(ctx, filter, update, options.Update().SetUpsert(t.Upsert))
 	if err != nil {
 		return nil, fmt.Errorf("error updating collection: %w", err)
 	}

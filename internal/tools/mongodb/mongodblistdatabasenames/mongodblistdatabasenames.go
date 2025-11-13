@@ -11,25 +11,22 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package mongodbinsertmany
+
+package mongodblistdatabasenames
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/goccy/go-yaml"
-	"github.com/googleapis/genai-toolbox/internal/sources"
 	mongosrc "github.com/googleapis/genai-toolbox/internal/sources/mongodb"
+	"github.com/googleapis/genai-toolbox/internal/sources"
 	"github.com/googleapis/genai-toolbox/internal/tools"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-const kind string = "mongodb-insert-many"
-
-const paramDataKey = "data"
+const kind string = "mongodb-list-database-names"
 
 func init() {
 	if !tools.Register(kind, newConfig) {
@@ -51,9 +48,6 @@ type Config struct {
 	Source       string   `yaml:"source" validate:"required"`
 	AuthRequired []string `yaml:"authRequired" validate:"required"`
 	Description  string   `yaml:"description" validate:"required"`
-	Database     string   `yaml:"database" validate:"required"`
-	Collection   string   `yaml:"collection"`
-	Canonical    bool     `yaml:"canonical" validate:"required"` //i want to force the user to choose
 }
 
 // validate interface
@@ -76,37 +70,21 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 		return nil, fmt.Errorf("invalid source for %q tool: source kind must be `mongodb`", kind)
 	}
 
-	dataParam := tools.NewStringParameterWithRequired(paramDataKey, "the JSON payload to insert, should be a JSON array of documents", true)
-
-	// Add collection parameter if not specified in config
-	var allParameters tools.Parameters
-	if cfg.Collection == "" {
-		collectionParam := tools.NewStringParameterWithRequired("collection", "The name of the collection to insert into", true)
-		allParameters = tools.Parameters{collectionParam, dataParam}
-	} else {
-		allParameters = tools.Parameters{dataParam}
-	}
-
 	// Create Toolbox manifest
-	paramManifest := allParameters.Manifest()
-
-	if paramManifest == nil {
-		paramManifest = make([]tools.ParameterManifest, 0)
-	}
+	paramManifest := make([]tools.ParameterManifest, 0)
 
 	// Create MCP manifest
-	mcpManifest := tools.GetMcpManifest(cfg.Name, cfg.Description, cfg.AuthRequired, allParameters)
+	mcpManifest := tools.GetMcpManifest(cfg.Name, cfg.Description, cfg.AuthRequired, nil)
+
 	// finish tool setup
 	return Tool{
-		Name:          cfg.Name,
-		Kind:          kind,
-		AuthRequired:  cfg.AuthRequired,
-		Collection:    cfg.Collection,
-		Canonical:     cfg.Canonical,
-		PayloadParams: allParameters,
-		database:      s.Client.Database(cfg.Database),
-		manifest:      tools.Manifest{Description: cfg.Description, Parameters: paramManifest, AuthRequired: cfg.AuthRequired},
-		mcpManifest:   mcpManifest,
+		Name:         cfg.Name,
+		Kind:         kind,
+		Description:  cfg.Description,
+		AuthRequired: cfg.AuthRequired,
+		client:       s.Client,
+		manifest:     tools.Manifest{Description: cfg.Description, Parameters: paramManifest, AuthRequired: cfg.AuthRequired},
+		mcpManifest:  mcpManifest,
 	}, nil
 }
 
@@ -114,62 +92,34 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 var _ tools.Tool = Tool{}
 
 type Tool struct {
-	Name          string   `yaml:"name"`
-	Kind          string   `yaml:"kind"`
-	AuthRequired  []string `yaml:"authRequired"`
-	Description   string   `yaml:"description"`
-	Collection    string   `yaml:"collection"`
-	Canonical     bool     `yaml:"canonical" validation:"required"` //i want to force the user to choose
-	PayloadParams tools.Parameters
+	Name         string `yaml:"name"`
+	Kind         string `yaml:"kind"`
+	Description  string `yaml:"description"`
+	AuthRequired []string
 
-	database    *mongo.Database
+	client      *mongo.Client
 	manifest    tools.Manifest
 	mcpManifest tools.McpManifest
 }
 
 func (t Tool) Invoke(ctx context.Context, params tools.ParamValues, accessToken tools.AccessToken) (any, error) {
-	if len(params) == 0 {
-		return nil, errors.New("no input found")
-	}
-
-	paramsMap := params.AsMap()
-
-	// Determine collection name
-	var collectionName string
-	if t.Collection != "" {
-		collectionName = t.Collection
-	} else {
-		colParam, ok := paramsMap["collection"]
-		if !ok {
-			return nil, fmt.Errorf("collection parameter is required")
-		}
-		collectionName, ok = colParam.(string)
-		if !ok {
-			return nil, fmt.Errorf("collection parameter must be a string")
-		}
-	}
-
-	var jsonData, ok = paramsMap[paramDataKey].(string)
-	if !ok {
-		return nil, errors.New("no input found")
-	}
-
-	var data = []any{}
-	err := bson.UnmarshalExtJSON([]byte(jsonData), t.Canonical, &data)
+	// List all databases
+	databases, err := t.client.ListDatabases(ctx, bson.D{})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error listing databases: %w", err)
 	}
 
-	res, err := t.database.Collection(collectionName).InsertMany(ctx, data, options.InsertMany())
-	if err != nil {
-		return nil, err
+	// Extract database names
+	var databaseNames []string
+	for _, db := range databases.Databases {
+		databaseNames = append(databaseNames, db.Name)
 	}
 
-	return res.InsertedIDs, nil
+	return databaseNames, nil
 }
 
 func (t Tool) ParseParams(data map[string]any, claims map[string]map[string]any) (tools.ParamValues, error) {
-	return tools.ParseParams(t.PayloadParams, data, claims)
+	return tools.ParseParams(nil, data, claims)
 }
 
 func (t Tool) Manifest() tools.Manifest {
